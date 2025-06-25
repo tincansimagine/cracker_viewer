@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WRTN 크래커 표시
 // @namespace    http://tampermonkey.net/
-// @version      1.1.0
+// @version      1.1.1
 // @description  WRTN 사이트의 크래커(크레딧) 정보를 상단 헤더에 항상 표시
 // @author       케츠
 // @match        https://crack.wrtn.ai/*
@@ -44,7 +44,7 @@
         // 초기화
         async init() {
             debug('초기화 시작...');
-            
+
             // 반응형 리사이즈 이벤트
             window.addEventListener('resize', () => {
                 this.isMobile = window.innerWidth <= 768;
@@ -54,26 +54,71 @@
             // 페이지 변경 감지
             this.observePageChanges();
 
-            // 크래커 정보 추출 및 표시
-            await this.setupCrackerDisplay();
+            // 채팅방 페이지인 경우에만 크래커 표시 설정
+            if (this.isChatPage()) {
+                debug('채팅방 페이지에서 초기화');
+                // 약간의 지연 후 설정 (페이지 로딩 완료 대기)
+                setTimeout(() => this.setupCrackerDisplay(), 1500);
+            } else {
+                debug('채팅방이 아닌 페이지. 크래커 표시 설정 건너뜀');
+            }
 
-            // 정기적 업데이트
+            // 정기적 업데이트 (채팅방에서만)
             this.startPeriodicUpdate();
         }
 
         // 페이지 변경 감지
         observePageChanges() {
+            let currentUrl = window.location.href;
+
             const observer = new MutationObserver(() => {
-                // 헤더가 사라졌는지 확인
-                if (this.displayElement && !document.body.contains(this.displayElement)) {
+                // URL 변경 감지
+                if (window.location.href !== currentUrl) {
+                    currentUrl = window.location.href;
+                    debug('페이지 변경 감지:', currentUrl);
+
+                    // 채팅방 페이지로 이동했을 때만 설정
+                    if (this.isChatPage()) {
+                        debug('채팅방 페이지로 이동. 크래커 표시 재설정...');
+                        setTimeout(() => this.setupCrackerDisplay(), 1000);
+                    } else {
+                        // 채팅방이 아닌 페이지에서는 크래커 표시 제거
+                        if (this.displayElement) {
+                            this.displayElement.remove();
+                            this.displayElement = null;
+                            debug('채팅방이 아닌 페이지. 크래커 표시 제거');
+                        }
+                    }
+                }
+
+                // 크래커 표시가 사라졌는지 확인 (채팅방에서만)
+                if (this.isChatPage() && this.displayElement && !document.body.contains(this.displayElement)) {
                     debug('크래커 표시가 제거됨. 재설정...');
                     this.setupCrackerDisplay();
+                }
+
+                // 챗 버튼이 새로 생겼는지 확인
+                if (this.isChatPage() && !this.displayElement) {
+                    const chatButton = document.querySelector('button:has(img[alt="일반챗"]), button:has(img[alt="슈퍼챗"]), button:has(img[src*="chat"])');
+                    if (chatButton) {
+                        debug('챗 버튼 발견. 크래커 표시 설정...');
+                        this.setupCrackerDisplay();
+                    }
                 }
             });
 
             observer.observe(document.body, {
                 childList: true,
                 subtree: true
+            });
+
+            // URL 변경 이벤트도 감지 (History API 사용 시)
+            window.addEventListener('popstate', () => {
+                setTimeout(() => {
+                    if (this.isChatPage()) {
+                        this.setupCrackerDisplay();
+                    }
+                }, 500);
             });
         }
 
@@ -109,48 +154,91 @@
             }
         }
 
-        // 헤더 찾기
+        // 헤더 찾기 (채팅방 헤더만 대상)
         async findHeader() {
-            // 다양한 헤더 선택자 시도
-            const headerSelectors = [
-                'div[display="flex"][width="100%"][height="48px"]',
-                'header',
-                '[class*="header"]',
-                'div[class*="css-1tb8v3v"]',
-                'div[class*="css-"][height="48px"]',
-                'nav',
-                'div[role="banner"]'
+            // 먼저 슈퍼챗 버튼이 있는 헤더를 찾기 (채팅방 헤더 확인)
+            const chatHeaderSelectors = [
+                'div[display="flex"][class*="css-1bhbevm"]', // 제공된 슈퍼챗 버튼 부모
+                'div:has(button:has(img[alt="슈퍼챗"]))',
+                'div:has(button:has(img[src*="superchat"]))',
+                'div:has(button:has(p:contains("슈퍼챗")))'
             ];
 
-            for (const selector of headerSelectors) {
-                const header = document.querySelector(selector);
-                if (header) {
-                    debug('헤더 발견:', selector);
-                    return header;
+            // 슈퍼챗 버튼이 있는 헤더 찾기
+            for (const selector of chatHeaderSelectors) {
+                try {
+                    const header = document.querySelector(selector);
+                    if (header) {
+                        debug('채팅 헤더 발견:', selector);
+                        return header.closest('div[display="flex"]') || header;
+                    }
+                } catch (e) {
+                    // 선택자 오류 무시
                 }
             }
 
-            // 대기 후 재시도
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // 더 일반적인 선택자로 재시도
-            const flexDivs = document.querySelectorAll('div[display="flex"]');
-            for (const div of flexDivs) {
-                const height = div.getAttribute('height') || window.getComputedStyle(div).height;
-                if (height === '48px' || height === '56px' || height === '64px') {
-                    debug('플렉스 헤더 발견');
-                    return div;
+            // 슈퍼챗 버튼을 직접 찾아서 부모 헤더 찾기
+            const superchatButtons = document.querySelectorAll('button');
+            for (const button of superchatButtons) {
+                const img = button.querySelector('img[alt="슈퍼챗"], img[src*="superchat"]');
+                const text = button.querySelector('p');
+
+                if (img || (text && text.textContent.includes('슈퍼챗'))) {
+                    debug('슈퍼챗 버튼 발견, 부모 헤더 찾는 중...');
+
+                    // 부모 요소들 중에서 헤더 역할을 하는 요소 찾기
+                    let parent = button.parentElement;
+                    while (parent && parent !== document.body) {
+                        const display = parent.getAttribute('display') || window.getComputedStyle(parent).display;
+                        const width = parent.getAttribute('width') || window.getComputedStyle(parent).width;
+
+                        // 헤더 조건: flex 레이아웃이고 너비가 넓은 요소
+                        if (display === 'flex' && (width === '100%' || parent.offsetWidth > window.innerWidth * 0.8)) {
+                            debug('슈퍼챗 버튼의 헤더 발견');
+                            return parent;
+                        }
+                        parent = parent.parentElement;
+                    }
+
+                    // 직접 부모가 헤더인 경우
+                    return button.parentElement;
+                }
+            }
+
+            // 폴백: 기존 방식
+            const fallbackSelectors = [
+                'div[display="flex"][width="100%"]',
+                'header',
+                'nav'
+            ];
+
+            for (const selector of fallbackSelectors) {
+                const header = document.querySelector(selector);
+                if (header) {
+                    // 채팅방인지 확인
+                    if (this.isChatPage()) {
+                        debug('폴백 헤더 발견:', selector);
+                        return header;
+                    }
                 }
             }
 
             return null;
         }
 
+        // 채팅방 페이지인지 확인
+        isChatPage() {
+            const url = window.location.href;
+            return url.includes('/c/') || // 채팅방 URL 패턴
+                   url.includes('/chat/') ||
+                   document.querySelector('button:has(img[alt="일반챗"]), button:has(img[alt="슈퍼챗"]), button:has(img[src*="chat"])') !== null; // 챗 버튼 존재
+        }
+
         // 크래커 표시 요소 생성
         createDisplayElement() {
             this.displayElement = document.createElement('div');
             this.displayElement.id = 'wrtn-cracker-display';
-            
+
             // 기본 스타일
             const baseStyles = {
                 display: 'flex',
@@ -164,8 +252,7 @@
                 fontWeight: '600',
                 color: '#333',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease',
-                marginRight: '12px'
+                transition: 'all 0.3s ease'
             };
 
             // 모바일 스타일 조정
@@ -202,8 +289,8 @@
         updateDisplayContent() {
             if (!this.displayElement) return;
 
-            const crackerText = this.crackerAmount !== null 
-                ? this.formatNumber(this.crackerAmount) 
+            const crackerText = this.crackerAmount !== null
+                ? this.formatNumber(this.crackerAmount)
                 : '로딩중...';
 
             const emojiSize = this.isMobile ? '14px' : '16px';
@@ -219,76 +306,98 @@
             return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         }
 
-        // 헤더에 추가
+        // 헤더에 추가 (일반챗/슈퍼챗 버튼 왼쪽에)
         addToHeader(header) {
-            // 슈퍼챗 또는 우측 영역 요소 찾기
-            const targetSelectors = [
-                // 슈퍼챗 관련 선택자들
-                'button[aria-label*="슈퍼챗"]',
-                'button[aria-label*="super"]',
-                'button svg path[d*="M19.5"]', // 슈퍼챗 아이콘 경로
-                'button:has(svg path[d*="M19.5"])', // 슈퍼챗 버튼
-                '[class*="super"]',
-                '[class*="chat"]',
-                // 기존 선택자들 (폴백용)
-                'div[class*="css-u4p24i"]', // 사용자 정보 영역
-                'button[class*="css-4xpglp"]', // 프로필 버튼
-                'div[class*="css-37zwmc"]', // 우측 영역
-                'div[display="flex"]:last-child' // 마지막 플렉스 요소
-            ];
+            // 일반챗 또는 슈퍼챗 버튼 찾기
+            let chatButton = null;
 
-            let targetElement = null;
-            let insertBefore = true; // 기본적으로 앞에 삽입
+            // 방법 1: 일반챗 버튼 찾기 (제공된 구조)
+            const normalChatButton = header.querySelector('button:has(img[alt="일반챗"])');
+            if (normalChatButton) {
+                chatButton = normalChatButton;
+                debug('일반챗 버튼 발견');
+            }
 
-            // 먼저 슈퍼챗 관련 요소 찾기
-            for (let i = 0; i < targetSelectors.length; i++) {
-                const selector = targetSelectors[i];
-                try {
-                    targetElement = header.querySelector(selector);
-                    if (targetElement) {
-                        debug('타겟 요소 발견:', selector);
-                        // 슈퍼챗 관련 요소면 앞에 삽입
-                        insertBefore = i < 6; // 처음 6개가 슈퍼챗 관련 선택자
-                        break;
-                    }
-                } catch (e) {
-                    // 잘못된 선택자 무시
+            // 방법 2: 슈퍼챗 버튼 찾기
+            if (!chatButton) {
+                const superchatButton = header.querySelector('button:has(img[alt="슈퍼챗"])');
+                if (superchatButton) {
+                    chatButton = superchatButton;
+                    debug('슈퍼챗 버튼 발견');
                 }
             }
 
-            // 더 구체적으로 슈퍼챗 버튼 찾기 (SVG 아이콘 기반)
-            if (!targetElement) {
+            // 방법 3: 이미지 src로 찾기
+            if (!chatButton) {
+                const imgButtons = header.querySelectorAll('button img');
+                for (const img of imgButtons) {
+                    if (img.src.includes('standard.webp') || img.src.includes('superchat.webp') ||
+                        img.src.includes('powerchat.webp') || img.src.includes('hyperchat.webp')) {
+                        chatButton = img.closest('button');
+                        debug('이미지 src로 챗 버튼 발견:', img.src);
+                        break;
+                    }
+                }
+            }
+
+            // 방법 4: 텍스트로 찾기
+            if (!chatButton) {
                 const allButtons = header.querySelectorAll('button');
                 for (const button of allButtons) {
-                    const svg = button.querySelector('svg');
-                    if (svg && (svg.innerHTML.includes('M19.5') || button.getAttribute('aria-label')?.includes('슈퍼'))) {
-                        targetElement = button;
-                        insertBefore = true;
-                        debug('슈퍼챗 버튼 발견 (SVG 검색)');
+                    const text = button.querySelector('p');
+                    if (text && (text.textContent.includes('챗') || text.textContent.includes('chat'))) {
+                        chatButton = button;
+                        debug('텍스트로 챗 버튼 발견:', text.textContent);
                         break;
                     }
                 }
             }
 
-            if (targetElement && insertBefore) {
-                // 타겟 요소 앞에 삽입
-                targetElement.parentNode.insertBefore(this.displayElement, targetElement);
-            } else if (targetElement) {
-                // 타겟 요소 뒤에 삽입
-                targetElement.parentNode.insertBefore(this.displayElement, targetElement.nextSibling);
+            // 방법 5: 클래스명으로 찾기
+            if (!chatButton) {
+                const classButtons = header.querySelectorAll('button[class*="css-10vup9s"], button[class*="css-b59yfh"]');
+                for (const button of classButtons) {
+                    const img = button.querySelector('img');
+                    if (img && (img.alt.includes('챗') || img.src.includes('chat') || img.src.includes('standard'))) {
+                        chatButton = button;
+                        debug('클래스명으로 챗 버튼 발견');
+                        break;
+                    }
+                }
+            }
+
+            if (chatButton) {
+                // 챗 버튼의 부모 컨테이너 찾기
+                const buttonContainer = chatButton.parentElement;
+
+                // 크래커 표시를 챗 버튼 바로 앞(왼쪽)에 삽입
+                buttonContainer.insertBefore(this.displayElement, chatButton);
+
+                // 챗 버튼과의 간격 추가
+                this.displayElement.style.marginRight = '16px'; // 챗 버튼과 16px 간격
+
+                // 부모 컨테이너가 flex가 아니면 설정
+                if (window.getComputedStyle(buttonContainer).display !== 'flex') {
+                    buttonContainer.style.display = 'flex';
+                    buttonContainer.style.alignItems = 'center';
+                }
+
+                debug('크래커 표시를 챗 버튼 왼쪽에 추가 완료');
             } else {
-                // 헤더의 마지막 자식으로 추가
-                header.appendChild(this.displayElement);
-                
-                // 헤더가 flex가 아니면 설정
+                // 챗 버튼을 찾지 못한 경우, 헤더 우측에 추가
+                debug('챗 버튼을 찾지 못함. 헤더 우측에 추가');
+
+                // 헤더의 우측 영역 찾기
+                const rightSection = header.querySelector('div:last-child') || header;
+                rightSection.appendChild(this.displayElement);
+
+                // 헤더 스타일 설정
                 if (window.getComputedStyle(header).display !== 'flex') {
                     header.style.display = 'flex';
                     header.style.alignItems = 'center';
                     header.style.justifyContent = 'space-between';
                 }
             }
-
-            debug('크래커 표시 추가 완료');
         }
 
         // 크래커 정보 업데이트
@@ -296,12 +405,12 @@
             try {
                 // 먼저 사이드바가 열려있는지 확인
                 let crackerElement = await this.findCrackerElement();
-                
+
                 // 찾지 못했으면 사이드바 열기
                 if (!crackerElement && !this.isMenuOpen) {
                     debug('크래커 정보를 찾을 수 없음. 사이드바 열기 시도...');
                     await this.openSidebar();
-                    
+
                     // 다시 찾기
                     crackerElement = await this.findCrackerElement();
                 }
@@ -309,7 +418,7 @@
                 if (crackerElement) {
                     const crackerText = crackerElement.textContent.trim();
                     const crackerNumber = parseInt(crackerText.replace(/,/g, ''), 10);
-                    
+
                     if (!isNaN(crackerNumber)) {
                         this.crackerAmount = crackerNumber;
                         this.updateDisplayContent();
@@ -394,7 +503,7 @@
                             debug('메뉴 버튼 클릭:', selector);
                             button.click();
                             this.isMenuOpen = true;
-                            
+
                             // 사이드바 열림 대기
                             await new Promise(resolve => setTimeout(resolve, 1000));
                             return;
@@ -461,9 +570,11 @@
                 clearInterval(this.updateTimer);
             }
 
-            // 정기적으로 크래커 정보 업데이트
+            // 정기적으로 크래커 정보 업데이트 (채팅방에서만)
             this.updateTimer = setInterval(() => {
-                this.updateCrackerInfo();
+                if (this.isChatPage() && this.displayElement) {
+                    this.updateCrackerInfo();
+                }
             }, CONFIG.updateInterval);
         }
 
@@ -502,4 +613,4 @@
     // 시작
     init();
 
-})(); 
+})();
