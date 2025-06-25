@@ -30,9 +30,9 @@
 - **Firefox**: [Violentmonkey](https://violentmonkey.github.io/)
 - **iOS Safari**: [Stay](https://apps.apple.com/kr/app/stay-for-safari/id1591620171)
 
-### 2단계: 스크립트 설치
+### 2단계: 스크립트 설치 / 업데이트
 
-[![Install Script](https://img.shields.io/badge/🚀%20Install-뤼튼_크래커_표시-orange?style=for-the-badge)](https://github.com/tincansimagine/crack_token_viewer/raw/refs/heads/main/wrtn-token-display.user.js)
+[![Install Script](https://img.shields.io/badge/🚀%20Install-뤼튼_크래커_표시-orange?style=for-the-badge)](https://github.com/tincansimagine/cracker_viewer/raw/refs/heads/main/wrtn-cracker-display.user.js)
 
 **직접 설치 링크:**
 https://github.com/tincansimagine/crack_bakcup/raw/refs/heads/main/wrtn-cracker-display.user.js
