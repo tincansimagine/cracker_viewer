@@ -7,6 +7,8 @@
 // @match        https://crack.wrtn.ai/*
 // @match        https://wrtn.ai/*
 // @icon         https://crack.wrtn.ai/favicon.ico
+// @updateURL    https://github.com/tincansimagine/cracker_viewer/raw/refs/heads/main/wrtn-cracker-display.user.js
+// @downloadURL  https://github.com/tincansimagine/cracker_viewer/raw/refs/heads/main/wrtn-cracker-display.user.js
 // @grant        none
 // @license      MIT
 // ==/UserScript==
